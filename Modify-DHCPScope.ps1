@@ -94,5 +94,3 @@
         throw "Unable to contact $ComputerName"
     }
 }
-
-Modify-DHCPScope -ComputerName dc1 -ScopeId 12.12.12.0 -SubnetMask 255.0.0.0 -StartRange 12.12.12.200 -EndRange 12.12.12.250 -BackupPath c:\temp\adsf.bak -Verbose -Force
