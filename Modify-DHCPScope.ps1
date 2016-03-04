@@ -19,25 +19,22 @@
     if (Test-Connection -ComputerName $ComputerName -Count 2 -Quiet) {
         try {
 
-            $PSDefaultParameterValues['*:Verbose'] = $true
-            $PSDefaultParameterValues['*:Force']   = $Force
-            $PSDefaultParameterValues['*:Leases']   = $true
+            $PSDefaultParameterValues['*:Verbose']       = $true
+            $PSDefaultParameterValues['*:Force']         = $Force
+            $PSDefaultParameterValues['*:Leases']        = $true
+            $PSDefaultParameterValues['*:ComputerName']  = $ComputerName
+            $PSDefaultParameterValues['*:ScopeId']       = $ScopeId
 
             $ErrorActionPreference = 'Stop'
 
             $XmlFile = ("$PSScriptRoot\$ScopeId.xml")
             $RestoreXml = ("$PSScriptRoot\$ScopeId.xml.bak")
 
-            $ComputerAndScope = @{
-                ComputerName = $ComputerName
-                ScopeId      = $ScopeId
-            }
-
             $ExportScopeProperties = @{
                 File   = $XmlFile
             }
 
-            Export-DhcpServer @ExportScopeProperties @ComputerAndScope
+            Export-DhcpServer @ExportScopeProperties
 
             [xml]$Xml = Get-Content -Path "$ScopeId.xml"
 
@@ -57,11 +54,11 @@
             }
             
             Write-Verbose 'Checking if scope is part of a failover relationship...'
-            $FailoverRelationship = Get-DhcpServerv4Failover @ComputerAndScope -ErrorAction SilentlyContinue
+            $FailoverRelationship = Get-DhcpServerv4Failover -ErrorAction SilentlyContinue
 
             if ($FailoverRelationship) {
                 Write-Verbose "Failover relationship found. Removing it from the partner server $($FailoverRelationship.PartnerServer)."
-                Remove-DhcpServerv4FailoverScope @ComputerAndScope -Name $FailoverRelationship.Name
+                Remove-DhcpServerv4FailoverScope -Name $FailoverRelationship.Name
 
                 if ($?) { $FailoverRemoved = $true }
 
@@ -69,12 +66,12 @@
                 Write-Verbose "No failover relationship found."
             }
 
-            Remove-DhcpServerv4Scope @ComputerAndScope
+            Remove-DhcpServerv4Scope
             if ($?) { $ScopeRemoved = $true }
-            Import-DhcpServer @ImportScopeProperties @ComputerAndScope
+            Import-DhcpServer @ImportScopeProperties
 
             if ($FailoverRelationship) {
-                Add-DhcpServerv4FailoverScope @ComputerAndScope -Name $FailoverRelationship.Name
+                Add-DhcpServerv4FailoverScope -Name $FailoverRelationship.Name
             }
         }
         catch {
@@ -82,11 +79,11 @@
             Write-Verbose 'Restoring scope'
 
             if ($ScopeRemoved) {
-                Import-DhcpServer @ComputerAndScope -BackupPath $BackupPath -File $RestoreXml
+                Import-DhcpServer -BackupPath $BackupPath -File $RestoreXml
             }
 
             if ($FailoverRemoved) {
-                Add-DhcpServerv4FailoverScope @ComputerAndScope -Name $FailoverRelationship.Name
+                Add-DhcpServerv4FailoverScope -Name $FailoverRelationship.Name
             }
 
             throw $Error[0]
