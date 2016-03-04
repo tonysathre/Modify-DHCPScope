@@ -20,6 +20,9 @@
         try {
 
             $PSDefaultParameterValues['*:Verbose'] = $true
+            $PSDefaultParameterValues['*:Force']   = $Force
+            $PSDefaultParameterValues['*:Leases']   = $true
+
             $ErrorActionPreference = 'Stop'
 
             $XmlFile = ("$PSScriptRoot\$ScopeId.xml")
@@ -31,16 +34,11 @@
             }
 
             $ExportScopeProperties = @{
-                Leases = $true
                 File   = $XmlFile
             }
 
-            if ($Force) {
-                Export-DhcpServer @ExportScopeProperties @ComputerAndScope -Force
-            } else {
-                Export-DhcpServer @ExportScopeProperties @ComputerAndScope
-            }
-            
+            Export-DhcpServer @ExportScopeProperties @ComputerAndScope
+
             [xml]$Xml = Get-Content -Path "$ScopeId.xml"
 
             $NodesToRemove = @(                 'Classes',                'OptionDefinitions',                'OptionValues',                'Filters'            )            foreach ($ChildNode in $NodesToRemove) {                $Node = $xml.SelectSingleNode("//$ChildNode")                $Node.ParentNode.RemoveChild($Node) | Out-Null            }
@@ -56,7 +54,6 @@
             $ImportScopeProperties = @{
                 BackupPath   = $BackupPath
                 File         = $XmlFile
-                Leases       = $true
             }
             
             Write-Verbose 'Checking if scope is part of a failover relationship...'
@@ -65,24 +62,16 @@
             if ($FailoverRelationship) {
                 Write-Verbose "Failover relationship found. Removing it from the partner server $($FailoverRelationship.PartnerServer)."
                 Remove-DhcpServerv4FailoverScope @ComputerAndScope -Name $FailoverRelationship.Name
+
                 if ($?) { $FailoverRemoved = $true }
+
             } else {
                 Write-Verbose "No failover relationship found."
             }
 
-            if ($Force) {
-                Remove-DhcpServerv4Scope @ComputerAndScope -Force
-
-                if ($?) { $ScopeRemoved = $true }
-
-                Import-DhcpServer @ImportScopeProperties @ComputerAndScope -Force
-            } else {
-                Remove-DhcpServerv4Scope @ComputerAndScope @ComputerAndScope -ErrorAction Stop
-
-                if ($?) { $ScopeRemoved = $true }
-
-                Import-DhcpServer @ImportScopeProperties @ComputerAndScope
-            }
+            Remove-DhcpServerv4Scope @ComputerAndScope
+            if ($?) { $ScopeRemoved = $true }
+            Import-DhcpServer @ImportScopeProperties @ComputerAndScope
 
             if ($FailoverRelationship) {
                 Add-DhcpServerv4FailoverScope @ComputerAndScope -Name $FailoverRelationship.Name
@@ -93,7 +82,7 @@
             Write-Verbose 'Restoring scope'
 
             if ($ScopeRemoved) {
-                Import-DhcpServer @ComputerAndScope -BackupPath $BackupPath -File $RestoreXml -Leases -Force
+                Import-DhcpServer @ComputerAndScope -BackupPath $BackupPath -File $RestoreXml
             }
 
             if ($FailoverRemoved) {
@@ -104,9 +93,9 @@
 
         }
         finally {
-            Remove-Item $XmlFile, $RestoreXml -Force
+            Remove-Item $XmlFile, $RestoreXml
         }
     } else {
-        throw "Unable to contact $ComputerName"
+        throw "Unable to contact $ComputerName."
     }
 }
