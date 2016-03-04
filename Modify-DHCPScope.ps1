@@ -19,10 +19,15 @@
         try {
             
             $ErrorActionPreference = 'Stop'
-            #$VerbosePreference     = 'Continue'
 
             $XmlFile = ("$PSScriptRoot\$ScopeId.xml")
-            
+            $RestoreXml = ("$PSScriptRoot\$ScopeId.xml.bak")
+
+            $ComputerAndScope = @{
+                ComputerName = $ComputerName
+                ScopeId      = $ScopeId
+            }
+
             $ExportScopeProperties = @{
                 ComputerName  = $ComputerName
                 ScopeId       = $ScopeId
@@ -39,56 +44,67 @@
 
             $NodesToRemove = @(                 'Classes',                'OptionDefinitions',                'OptionValues',                'Filters'            )            foreach ($ChildNode in $NodesToRemove) {                $Node = $xml.SelectSingleNode("//$ChildNode")                $Node.ParentNode.RemoveChild($Node) | Out-Null            }
 
+            # Save backup of current scope configuration in case restore fails after removing the scope
+            $Xml.Save($RestoreXml)
+
             $Xml.DHCPServer.IPv4.Scopes.Scope.SubnetMask = $SubnetMask
             $Xml.DHCPServer.IPv4.Scopes.Scope.StartRange = $StartRange
             $Xml.DHCPServer.IPv4.Scopes.Scope.EndRange   = $EndRange
             $Xml.Save($XmlFile)
 
-            $RemoveScopeProperties = @{
-                ComputerName = $ComputerName
-                ScopeId      = $ScopeId
-            }
-
             $ImportScopeProperties = @{
-                ComputerName = $ComputerName
-                ScopeId      = $ScopeId
                 BackupPath   = $BackupPath
                 File         = $XmlFile
-            }
-
-            $FailoverProperties = @{
-                ComputerName = $ComputerName
-                Name         = $FailoverRelationship.Name
-                ScopeId      = $ScopeId
+                Leases       = $true
+                Verbose      = $true
             }
             
             Write-Verbose 'Checking if scope is part of a failover relationship...'
-            $FailoverRelationship = Get-DhcpServerv4Failover -ComputerName $ComputerName -ScopeId $ScopeId -ErrorAction SilentlyContinue
+            $FailoverRelationship = Get-DhcpServerv4Failover @ComputerAndScope -ErrorAction SilentlyContinue
 
             if ($FailoverRelationship) {
                 Write-Verbose "Failover relationship found. Removing it from the partner server $($FailoverRelationship.PartnerServer)."
-                Remove-DhcpServerv4FailoverScope -ComputerName $ComputerName -ScopeId $ScopeId -Name $FailoverRelationship.Name -Verbose
+                Remove-DhcpServerv4FailoverScope @ComputerAndScope -Name $FailoverRelationship.Name -Verbose
+                if ($?) { $FailoverRemoved = $true }
             } else {
-                Write-Verbose "No failover relationship found."    
+                Write-Verbose "No failover relationship found."
             }
 
             if ($Force) {
-                Remove-DhcpServerv4Scope @RemoveScopeProperties -Force -Verbose
-                Import-DhcpServer @ImportScopeProperties -Leases -Force -Verbose
+                Remove-DhcpServerv4Scope @ComputerAndScope -Force -Verbose
+
+                if ($?) { $ScopeRemoved = $true }
+
+                Import-DhcpServer @ImportScopeProperties @ComputerAndScope -Force
             } else {
-                Remove-DhcpServerv4Scope @RemoveScopeProperties -ErrorAction Stop -Verbose
-                Import-DhcpServer @ImportScopeProperties -Leases -Verbose
+                Remove-DhcpServerv4Scope @ComputerAndScope @ComputerAndScope -ErrorAction Stop -Verbose
+
+                if ($?) { $ScopeRemoved = $true }
+
+                Import-DhcpServer @ImportScopeProperties @ComputerAndScope
             }
 
             if ($FailoverRelationship) {
-                Add-DhcpServerv4FailoverScope @FailoverProperties -Verbose
+                Add-DhcpServerv4FailoverScope @ComputerAndScope -Name $FailoverRelationship.Name -Verbose
             }
         }
         catch {
+            # If something failed, reimport the scope and restore the failover relationship
+            Write-Verbose 'Restoring scope'
+
+            if ($ScopeRemoved) {
+                Import-DhcpServer @ComputerAndScope -BackupPath $BackupPath -File $RestoreXml -Leases -Verbose
+            }
+
+            if ($FailoverRemoved) {
+                Add-DhcpServerv4FailoverScope @ComputerAndScope -Name $FailoverRelationship.Name -Verbose  
+            }
+
             throw $Error[0]
+
         }
         finally {
-            Remove-Item $XmlFile -Force -Verbose
+            Remove-Item $XmlFile, $RestoreXml -Force -Verbose
         }
     } else {
         throw "Unable to contact $ComputerName"
